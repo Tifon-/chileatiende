@@ -1,0 +1,21 @@
+<?php
+
+
+/**
+ * Implements hook_uninstall
+ */
+function chileatiende_uninstall() {
+  db_delete('variable')
+    ->condition('name','chileatiende_%','LIKE')
+    ->execute();
+}
+
+
+/**
+ * Implements hook_enable
+ */
+function chileatiende_enable() {
+	//Una vez que se instala el modulo, se debe ingresar el access token
+	if(variable_get('chileatiende_access_token','') == '')
+		drupal_set_message(t('Debe ingresar el Access Token !here',array('!here' => l(t('aquí'),'admin/chileatiende'))));
+}

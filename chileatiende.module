@@ -1,0 +1,336 @@
+<?php
+
+
+
+/**
+ * Implements hook_help
+ */
+function chileatiende_help($path, $arg) {
+  switch($path){
+    case 'admin/help#chileatiende':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('El módulo se conecta al API del sitio de <a href="https://www.chileatiende.cl/desarrolladores">ChileAprende</a>.') . '</p>';
+      $output .= '<h3>' . t('Uses') . '</h3>';
+      $output .= '<dl>';
+      $output .= '<dt>' . t('Filter Input') . '</dt>';
+      $output .= '<dd>' . t('Se habilita un filtro para imprimir contenidos de ChileAprende, configurandolo <a href="@formats">aquí</a>.', array('@formats' => url('admin/config/content/formats'))) . '</dd>';
+      $output .= '<dd>' . theme('chileatiende_tips') . '</dd>';
+      $output .= '<dt>' . t('Search') . '</dt>';
+      $output .= '<dd>' . t('Se habilita un buscador de Fichas y Servicios.') . '</dd>';
+      $output .= '</dl>';
+      
+      return $output;
+      break;
+  }
+}
+
+
+/**
+ * Implements hook_permission
+ */
+function chileatiende_permission() {
+	return array(
+		'access chileatiende search' => array(
+			'title' => t('Acceso al buscador de ChileAtiende')
+		),
+		'configure chileatiende' => array(
+			'title' => t('Configurar parámetros para acceder a ChileAtiende')
+		),
+	);
+}
+
+
+
+/**
+ * Implements hook_menu
+ */
+function chileatiende_menu() {
+	$items['admin/chileatiende'] = array(
+		'title' => 'ChileAtiende',
+    'description' => 'Configurar parámetros para el funcionamiento de ChileAtiende',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('chileatiende_settings_form'),
+		'access arguments' => array('configure chileatiende'),
+		'file' => 'chileatiende.admin.inc'
+	);
+	$items['chileatiende'] = array(
+		'title' => 'ChileAtiende',
+		'page callback' => 'chileatiende_page_main',
+		'access arguments' => array('access chileatiende search'),
+		'file' => 'chileatiende.pages.inc',
+	);
+	
+	$items['chileatiende/fichas'] = array(
+		'title' => 'Fichas',
+		'page callback' => 'chileatiende_fichas_page',
+		'access arguments' => array('access chileatienda search'),
+		'file' => 'chileatiende.pages.inc',
+	);
+
+  
+  $items['chileatiende/servicios'] = array(
+		'title' => 'Servicios',
+		'page callback' => 'chileatiende_servicios_page',
+		'access arguments' => array('access chileatienda search'),
+		'file' => 'chileatiende.pages.inc',
+	);
+  $items['chileatiende/fichas/%'] = array(
+		'title' => 'Ficha',
+		'page callback' => 'chileatiende_ficha_page',
+    'page arguments' => array(2),
+		'access arguments' => array('access chileatienda search'),
+		'file' => 'chileatiende.pages.inc',
+	);
+  
+  $items['chileatiende/servicios/%'] = array(
+		'title' => 'Servicio',
+		'page callback' => 'chileatiende_servicio_page',
+    'page arguments' => array(2),
+		'access arguments' => array('access chileatienda search'),
+		'file' => 'chileatiende.pages.inc',
+	);
+	return $items;
+}
+
+
+
+/**
+ * Preparamos el output de los datos de un recurso
+ */
+function chileatiende_output($recurso, $id, $filters = array()) {
+	$function_get = 'chileatiende_get_' . $recurso;
+	$data = $function_get($id);
+	if(!isset($data[$recurso])) {
+    return 'No se encontró ningún ' . $recurso . ' con el id ' . $id;
+  }
+  $rows = array();
+  if(empty($filters)) {
+    foreach($data[$recurso] as $key => $value) {
+      $rows[] = array(
+        $key,
+        $value
+      );
+    }
+    return theme('table',array('rows' => $rows));
+  }else {
+  	if(count($filters) == 1 && isset($data[$recurso][$filters[0]])){
+  		$output = $data[$recurso][$filters[0]];
+  	}else {
+  		$output = '';
+	    foreach($filters as $filter) {
+	      $output .= '<div class="chileatiende-' . $recurso . '-' . $filter. '">';
+	      $output .= $data[$recurso][$filter];
+	      $output .= '</div>'; 
+	    }
+  	}
+    
+    return $output;
+  }
+}
+
+
+
+/**
+ * Implements hook_filter_info
+ */
+function chileatiende_filter_info() {
+  $filters['chileatiende_filter'] = array(
+    'title' => t('ChileAtiende Filter'),
+    'description' => 'Imprime el contenido completo o parte de una ficha o servicio',
+    'process callback'  => '_chileatiende_filter_process',
+    'tips callback' => '_chileatiende_filter_tips',
+    'cache' => FALSE,
+  );
+  return $filters;
+}
+
+
+
+function _chileatiende_filter_tips($filter, $format, $long = FALSE) {
+	if(!$long) {
+		return t('Para extraer la información de un recurso de ChileAtiende, puede escribir [chileatiende-recurso:id datos]');
+	}
+	return theme('chileatiende_tips');
+}
+
+
+
+
+/**
+ * Process Callback para el filtro chileatiende
+ * @param type $text
+ * @param type $filter
+ * @param type $format
+ * @return type
+ */
+function _chileatiende_filter_process($text, $filter, $format) {
+  $text = preg_replace_callback('/\[chileatiende-ficha:([^\s\]]+)((?:\s+[a-zA-Z]+(?:=[^;]*;)?)*)\s*\]/', '_chileatiende_filter_process_replace_ficha', $text);
+  $text = preg_replace_callback('/\[chileatiende-servicio:([^\s\]]+)((?:\s+[a-zA-Z]+(?:=[^;]*;)?)*)\s*\]/', '_chileatiende_filter_process_replace_servicio', $text);
+  return  $text;
+}
+
+
+/**
+ * Callback de preg_replace_callback
+ * @param type $matches
+ * @return type
+ */
+function _chileatiende_filter_process_replace_ficha($matches) {
+
+  $data = chileatiende_get_ficha($matches[1]);
+  if(isset($data['ficha'])) {
+    module_load_include('inc','chileatiende','chileatiende.pages');
+    $filters = array();
+    if($matches[2] != '')
+      $filters = explode(' ',trim($matches[2]));
+		return chileatiende_output('ficha',$matches[1],$filters);
+  }else return '[chileatiende ficha ' . $matches[1] . ' no encontrada]';
+
+}
+
+
+/**
+ * Callback de preg_replace_callback
+ * Busca los datos de un servicio
+ */
+function _chileatiende_filter_process_replace_servicio($matches) {
+  $data = chileatiende_get_servicio($matches[1]);
+  if(isset($data['servicio'])) {
+    module_load_include('inc','chileatiende','chileatiende.pages');
+    $filters = array();
+    if($matches[2] != '')
+      $filters = explode(' ',trim($matches[2]));
+		return chileatiende_output('servicio',$matches[1],$filters);
+  }else return '[chileatiende servicio ' . $matches[1] . ' no encontrada]';
+}
+
+
+
+/**
+ * Implements hook_theme
+ */
+function chileatiende_theme() {
+	return array(
+		'chileatiende_tips' => array(
+			'variables' => array(),
+			'template' => 'chileatiende-tips' 
+		)
+	);
+}
+
+
+/**
+ * Conexion al API
+ */
+function chileatiende_base_url() {
+	return 'https://www.chileatiende.cl/api/';
+}
+
+
+/**
+ * 
+ */
+function chileatiende_get_fichas_by_servicio($servicio_id) {
+  $data = array(
+		'access_token' => variable_get('chileatiende_access_token',''),
+	);
+  $url = url(chileatiende_base_url() . 'servicios/' . $servicio_id . '/fichas', array('query' => $data));
+  $response = drupal_http_request($url);
+	return chileatiende_response($response, 'Solicitud de fichas del servicio ' . $servicio_id);
+  
+}
+
+
+/**
+ * Funcion que retorna la lista de un recurso, ya sea fichas o servicios
+ */
+function chileatiende_get_list($recurso, $nextPageToken = null) {
+	$data = array(
+		'access_token' => variable_get('chileatiende_access_token',''),
+	);
+	if($nextPageToken) {
+		$data['pageToken'] = $nextPageToken;
+	}
+	$url = url(chileatiende_base_url() . $recurso, array('query' => $data));
+	$response = drupal_http_request($url);
+	return chileatiende_response($response, 'Lista del recurso ' . $recurso);
+}
+
+
+
+
+
+/**
+ * Funcion que consulta una ficha en particular
+ * @staticvar array $fichas
+ * @param type $id
+ * @return array
+ */
+function chileatiende_get_ficha($id) {
+  static $fichas = array();
+  
+  if(isset($fichas[$id])) return $fichas[$id];
+	$recurso = 'fichas';
+	$data = array(
+		'access_token' => variable_get('chileatiende_access_token',''),
+	);
+	$url = url(chileatiende_base_url() . $recurso . '/' . $id, array('query' => $data));
+	
+
+	$response = drupal_http_request($url);
+	if($data = chileatiende_response($response, 'se solicita ficha ' . $id)) {
+		$fichas[$id] = $data;
+		return $data;
+	}
+	return FALSE;
+}
+
+
+/**
+ * Funcion que se conecta al API de ChileAtiende para obtener un servicio
+ */
+function chileatiende_get_servicio($id) {
+  static $servicios = array();
+  
+  if(isset($servicios[$id])) return $servicios[$id];
+	$recurso = 'servicios';
+	$data = array(
+		'access_token' => variable_get('chileatiende_access_token',''),
+	);
+	$url = url(chileatiende_base_url() . $recurso . '/' . $id, array('query' => $data));
+	
+	$response = drupal_http_request($url);
+	if($data = chileatiende_response($response, 'se solicita servicio ' . $id)) {
+		$servicios[$id] = $data;
+		return $data;
+	}
+	return FALSE;
+}
+
+
+
+
+/**
+ * Prepara el output del response
+ */
+function chileatiende_response($response, $solicitud) {
+	if(!isset($response->data) && isset($response->error)) {
+		drupal_set_message($response->error,'error');
+		return FALSE;
+	}
+	if(isset($response->code)) {
+		switch($response->code) {
+			case '200':
+				if(variable_get('chileatiende_watchdog',0)) {
+					watchdog('ChileAtiende Debug','Se ha conectado a ChileAtiende: ' . $solicitud);
+				}
+				return drupal_json_decode($response->data);
+			case '401':
+				drupal_set_message('Acceso no autorizado, revise el Access Token','error');
+				return FALSE;
+		}
+	}
+	drupal_set_message('Algo salio mal','error');
+	return FALSE;
+}
